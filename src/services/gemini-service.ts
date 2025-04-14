@@ -1,15 +1,6 @@
 
 import { API_KEYS } from "@/config/api-config";
 import { ChatMessage, FileInfo, WebSearchResult } from "@/types/types";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-// Initialize the Google Generative AI with the API key from our config
-const genAI = new GoogleGenerativeAI(API_KEYS.GEMINI_API_KEY);
-
-// Helper to get the Gemini model
-const getGeminiModel = () => {
-  return genAI.getGenerativeModel({ model: "gemini-pro" });
-};
 
 // Send a message to the Gemini API and get a response
 export const sendMessageToGemini = async (
@@ -18,43 +9,57 @@ export const sendMessageToGemini = async (
   searchResults: WebSearchResult[] = []
 ): Promise<string> => {
   try {
-    const model = getGeminiModel();
-    
-    // Format the conversation history for the API
-    const formattedMessages = formatMessages(messages);
-    
+    // Create payload for the Gemini API
+    const payload = {
+      contents: [
+        {
+          parts: [
+            { text: formatChatHistory(messages) }
+          ]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 1024,
+      }
+    };
+
     // Add context from files if available
     if (files.length > 0) {
-      formattedMessages.push(`Context from uploaded files:\n${formatFilesContent(files)}`);
+      payload.contents[0].parts[0].text += `\n\nContext from uploaded files:\n${formatFilesContent(files)}`;
     }
     
     // Add web search results if available
     if (searchResults.length > 0) {
-      formattedMessages.push(`Web search results:\n${formatSearchResults(searchResults)}`);
+      payload.contents[0].parts[0].text += `\n\nWeb search results:\n${formatSearchResults(searchResults)}`;
     }
-    
-    // Create a chat session
-    const chat = model.startChat({
-      history: formattedMessages.slice(0, -1).map(msg => ({
-        role: "user",
-        parts: [{ text: msg }],
-      })),
+
+    // Make the API request
+    const response = await fetch(`${API_KEYS.GEMINI_API_URL}?key=${API_KEYS.GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
     });
-    
-    // Send the latest message
-    const result = await chat.sendMessage(formattedMessages[formattedMessages.length - 1]);
-    const response = result.response.text();
-    
-    return response;
+
+    if (!response.ok) {
+      throw new Error(`API request failed with status ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.candidates[0].content.parts[0].text;
   } catch (error) {
     console.error("Error sending message to Gemini:", error);
     return "Sorry, I encountered an error. Please try again.";
   }
 };
 
-// Format the chat messages for the API
-const formatMessages = (messages: ChatMessage[]): string[] => {
-  return messages.map(msg => msg.content);
+// Format the entire chat history for the API
+const formatChatHistory = (messages: ChatMessage[]): string => {
+  return messages.map(msg => `${msg.role}: ${msg.content}`).join('\n\n');
 };
 
 // Format the content of uploaded files
@@ -69,13 +74,50 @@ const formatSearchResults = (results: WebSearchResult[]): string => {
   ).join("\n\n");
 };
 
-// Simulated web search function (replace with actual implementation)
-export const searchWeb = async (query: string): Promise<WebSearchResult[]> => {
-  // Simulate web search results
+// Renamed functions to match what's expected in Index.tsx
+export const generateChatResponse = async (
+  messages: ChatMessage[], 
+  language: string = "en"
+): Promise<string> => {
+  // Add language context to the messages
+  const messagesWithLang = [
+    ...messages,
+    { 
+      role: "system", 
+      content: `Please respond in ${language} language.` 
+    }
+  ];
+  
+  return sendMessageToGemini(messagesWithLang);
+};
+
+// Function to process file content
+export const processFileContent = async (
+  fileContent: string, 
+  query: string, 
+  language: string = "en"
+): Promise<string> => {
+  const messages: ChatMessage[] = [
+    { 
+      role: "system", 
+      content: `The following is content from uploaded files. Please analyze it and answer the user's question in ${language} language.` 
+    },
+    { 
+      role: "user", 
+      content: `File content: ${fileContent}\n\nMy question: ${query}` 
+    }
+  ];
+  
+  return sendMessageToGemini(messages);
+};
+
+// Updated web search function to return a string response
+export const searchWeb = async (query: string, language: string = "en"): Promise<string> => {
+  // Log the search query
   console.log(`Searching the web for: ${query}`);
   
-  // This would be replaced with an actual API call in production
-  return [
+  // Simulate web search results
+  const results: WebSearchResult[] = [
     {
       title: "Example Search Result 1",
       link: "https://example.com/result1",
@@ -87,4 +129,19 @@ export const searchWeb = async (query: string): Promise<WebSearchResult[]> => {
       snippet: "Another example search result with information related to the query."
     }
   ];
+  
+  // Create a message to process the search results
+  const messages: ChatMessage[] = [
+    { 
+      role: "system", 
+      content: `The following are web search results for the query: "${query}". Please summarize these results in ${language} language.` 
+    },
+    { 
+      role: "user", 
+      content: formatSearchResults(results)
+    }
+  ];
+  
+  // Send the request to Gemini
+  return sendMessageToGemini(messages, [], results);
 };
