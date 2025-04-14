@@ -80,7 +80,7 @@ export const generateChatResponse = async (
   language: string = "en"
 ): Promise<string> => {
   // Add language context to the messages
-  const messagesWithLang = [
+  const messagesWithLang: ChatMessage[] = [
     ...messages,
     { 
       role: "system", 
