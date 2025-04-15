@@ -36,6 +36,8 @@ export const sendMessageToGemini = async (
       payload.contents[0].parts[0].text += `\n\nWeb search results:\n${formatSearchResults(searchResults)}`;
     }
 
+    console.log("Sending request to Gemini API with payload:", JSON.stringify(payload));
+
     // Make the API request
     const response = await fetch(`${API_KEYS.GEMINI_API_URL}?key=${API_KEYS.GEMINI_API_KEY}`, {
       method: 'POST',
@@ -46,10 +48,19 @@ export const sendMessageToGemini = async (
     });
 
     if (!response.ok) {
-      throw new Error(`API request failed with status ${response.status}`);
+      const errorText = await response.text();
+      console.error("API response error:", errorText);
+      throw new Error(`API request failed with status ${response.status}: ${errorText}`);
     }
 
     const data = await response.json();
+    console.log("Received response from Gemini API:", data);
+    
+    if (!data.candidates || !data.candidates[0] || !data.candidates[0].content || !data.candidates[0].content.parts || !data.candidates[0].content.parts[0]) {
+      console.error("Unexpected API response format:", data);
+      return "Sorry, I received an unexpected response format. Please try again.";
+    }
+    
     return data.candidates[0].content.parts[0].text;
   } catch (error) {
     console.error("Error sending message to Gemini:", error);
